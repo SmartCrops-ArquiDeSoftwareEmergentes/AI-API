@@ -58,6 +58,28 @@ $body = @{ question = "Tengo maíz en V6 con hojas amarillas en bordes. ¿Qué h
 Invoke-RestMethod -Uri "$base/v1/agro/ask" -Method Post -Body $body -ContentType "application/json"
 ```
 
+### Salir del modo DEMO en Vercel
+Si recibes respuestas con `[MODO DEMO]`, significa que el servicio está en modo simulado. Para respuestas reales, configura:
+
+- Define `GEMINI_API_KEY` en el entorno (Producción) de Vercel.
+- Establece `MOCK_MODE=false` en el entorno (Producción).
+- Redeploya el proyecto para aplicar los cambios.
+
+CLI (interactivo) en Windows:
+```cmd
+vercel env add GEMINI_API_KEY production
+# Pega tu clave y confirma
+vercel env add MOCK_MODE production
+# Escribe: false
+
+# Después de actualizar variables, redeploya
+vercel --prod
+```
+
+Verificación rápida:
+- `GET /health` debe devolver `"mock_mode": false` y el nombre de modelo.
+- `POST /v1/agro/ask` ya no incluirá la etiqueta `[MODO DEMO]`.
+
 Notas para serverless:
 - El archivo de prompt está embebido con un fallback si no se puede leer desde disco (útil en entornos serverless).
 - Si no defines `GEMINI_API_KEY` o hay error al configurar el cliente, la API cae automáticamente en modo demo.
