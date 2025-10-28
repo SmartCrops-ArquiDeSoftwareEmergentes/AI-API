@@ -18,7 +18,17 @@ logger = get_logger("agro.gemini")
 class GeminiClient:
     def __init__(self, prompt_path: Path):
         self.settings = get_settings()
-        self.prompt_text = prompt_path.read_text(encoding="utf-8")
+        # Carga robusta del prompt para entornos serverless
+        default_prompt = (
+            "Eres un asistente educativo en agricultura. Brindas orientación general, no prescriptiva, "
+            "evitando marcas, dosis exactas y pasos operativos. Te enfocas en buenas prácticas, factores a considerar, "
+            "rangos típicos y sugerencias de monitoreo. Respondes en español de forma clara y concisa."
+        )
+        try:
+            self.prompt_text = prompt_path.read_text(encoding="utf-8")
+        except Exception:
+            logger.warning("No se pudo leer el archivo de prompt en %s; usando prompt por defecto.", prompt_path)
+            self.prompt_text = default_prompt
         self._model = None
         self._configured = False
 

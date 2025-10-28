@@ -26,10 +26,45 @@ uvicorn app.main:app --reload --port 8000
 
 Abre http://127.0.0.1:8000/docs para probar desde Swagger UI.
 
+## Despliegue en Vercel
+Este proyecto está listo para ser desplegado como Función Serverless de Python en Vercel.
+
+- Estructura: el entrypoint para Vercel es `api/index.py`, que expone la app ASGI.
+- Configuración de rutas: `vercel.json` redirige todo a `api/index.py`.
+- Requisitos en Vercel: Vercel instala automáticamente las dependencias detectando `requirements.txt`.
+
+Pasos:
+1) Inicia sesión en Vercel (CLI) y despliega.
+
+```cmd
+vercel login
+vercel --prod
+```
+
+2) Variables de entorno en Vercel (Dashboard o CLI):
+- `GEMINI_API_KEY`: tu clave de Google AI Studio (opcional si usas demo).
+- `MODEL` (opcional): por defecto `gemini-1.5-pro-latest` (recomendado: `gemini-2.5-flash`).
+- `MOCK_MODE`: `true` (demo) o `false` (real).
+- `LOG_LEVEL` (opcional): `INFO` por defecto.
+- `TIMEOUT_S` (opcional): `30` por defecto.
+- `MAX_INPUT_CHARS` (opcional): `12000` por defecto.
+
+3) Probar endpoints desplegados (reemplaza la URL):
+```powershell
+$base = "https://tu-deploy.vercel.app"
+Invoke-RestMethod -Uri "$base/health" -Method Get
+
+$body = @{ question = "Tengo maíz en V6 con hojas amarillas en bordes. ¿Qué hago?"; crop = "maíz"; temperature = 28 } | ConvertTo-Json -Depth 4
+Invoke-RestMethod -Uri "$base/v1/agro/ask" -Method Post -Body $body -ContentType "application/json"
+```
+
+Notas para serverless:
+- El archivo de prompt está embebido con un fallback si no se puede leer desde disco (útil en entornos serverless).
+- Si no defines `GEMINI_API_KEY` o hay error al configurar el cliente, la API cae automáticamente en modo demo.
+
 ## Endpoints
 - GET `/health` -> Estado del servicio, modelo y si está en modo demo.
 - POST `/v1/agro/ask` -> Pregunta con contexto agrícola y datos. Responde con recomendaciones.
- - POST `/v1/agro/ask` -> Pregunta con contexto agrícola y datos. Responde con recomendaciones.
 
 ### Parámetros del body
 - question (str, requerido)
@@ -64,8 +99,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8000/v1/agro/ask" -Method Post -Body $b
 ## Notas
 - En modo demo (MOCK_MODE=true o sin GEMINI_API_KEY), la API devuelve una respuesta simulada útil para flujos y pruebas.
 - Para respuestas reales, coloca tu clave en `.env` y establece `MOCK_MODE=false`.
-- Ajusta el modelo con `MODEL` (por defecto `gemini-1.5-pro-latest`).
- - Ajusta el modelo con `MODEL` (por defecto `gemini-1.5-pro-latest`). Recomendado: `gemini-2.5-flash` por velocidad.
+- Ajusta el modelo con `MODEL` (por defecto `gemini-1.5-pro-latest`). Recomendado: `gemini-2.5-flash` por velocidad.
 
 ## Estructura
 ```
@@ -78,6 +112,9 @@ app/
   schemas/
     requests.py
     responses.py
+api/
+  index.py
+vercel.json
 scripts/smoke_test.py
 ```
 
