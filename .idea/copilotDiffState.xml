@@ -29,6 +29,15 @@
             </PendingDiffInfo>
           </value>
         </entry>
+        <entry key="$PROJECT_DIR$/requirements.txt">
+          <value>
+            <PendingDiffInfo>
+              <option name="filePath" value="$PROJECT_DIR$/requirements.txt" />
+              <option name="originalContent" value="fastapi&gt;=0.111.0&#10;uvicorn[standard]&gt;=0.29.0&#10;pydantic&gt;=2.5.0&#10;# pydantic-settings is required for BaseSettings in Pydantic v2&#10;pydantic-settings&gt;=2.5.2&#10;python-dotenv&gt;=1.0.1&#10;google-generativeai&gt;=0.7.0&#10;httpx&gt;=0.27.0&#10;tenacity&gt;=8.2.3&#10;" />
+              <option name="updatedContent" value="fastapi&gt;=0.111.0&#13;&#10;uvicorn[standard]&gt;=0.29.0&#13;&#10;pydantic&gt;=2.5.0&#13;&#10;# pydantic-settings is required for BaseSettings in Pydantic v2&#13;&#10;pydantic-settings&gt;=2.5.2&#13;&#10;python-dotenv&gt;=1.0.1&#13;&#10;google-generativeai&gt;=0.7.0&#13;&#10;httpx&gt;=0.27.0&#13;&#10;tenacity&gt;=8.2.3&#13;&#10;packaging&gt;=23.2" />
+            </PendingDiffInfo>
+          </value>
+        </entry>
         <entry key="$PROJECT_DIR$/vercel.json">
           <value>
             <PendingDiffInfo>
