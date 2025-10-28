@@ -33,8 +33,8 @@
           <value>
             <PendingDiffInfo>
               <option name="filePath" value="$PROJECT_DIR$/vercel.json" />
-              <option name="originalContent" value="&#10;" />
-              <option name="updatedContent" value="{&#10;  &quot;version&quot;: 2,&#10;  &quot;functions&quot;: {&#10;    &quot;api/index.py&quot;: {&#10;      &quot;runtime&quot;: &quot;python3.11&quot;&#10;    }&#10;  },&#10;  &quot;routes&quot;: [&#10;    { &quot;src&quot;: &quot;/(.*)&quot;, &quot;dest&quot;: &quot;api/index.py&quot; }&#10;  ]&#10;}" />
+              <option name="originalContent" value="&#10;&#10;&#10;" />
+              <option name="updatedContent" value="{&#10;  &quot;version&quot;: 2,&#10;  &quot;routes&quot;: [&#10;    { &quot;src&quot;: &quot;/(.*)&quot;, &quot;dest&quot;: &quot;api/index.py&quot; }&#10;  ]&#10;}" />
             </PendingDiffInfo>
           </value>
         </entry>
