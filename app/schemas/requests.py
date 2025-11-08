@@ -13,3 +13,31 @@ class AskRequest(BaseModel):
         None,
         description="Control de longitud de salida: 'short' (muy conciso) o 'medium' (conciso). Si no se indica, se usa 'medium'.",
     )
+    # Campos opcionales para lecturas de sensores y ajustes dirigidos
+    parameter: Optional[Literal[
+        "soil_moisture",
+        "air_temperature",
+        "soil_temperature",
+        "air_humidity",
+        "soil_ph",
+        "ec",
+        "ndvi",
+        "rain",
+        "vpd",
+        "other",
+    ]] = Field(
+        None,
+        description="Nombre del parámetro medido (si se busca una recomendación de ajuste)."
+    )
+    value: Optional[float] = Field(
+        None,
+        description="Valor observado del parámetro (numérico)."
+    )
+    unit: Optional[str] = Field(
+        None,
+        description="Unidad del parámetro (p. ej., % , °C, dS/m, pH, mm, etc.)."
+    )
+    stage: Optional[str] = Field(
+        None,
+        description="Etapa fenológica (opcional), p. ej., V6, floración, cuaje, etc."
+    )

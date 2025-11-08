@@ -1,6 +1,6 @@
 # Agro Gemini API
 
-Una API en FastAPI que envuelve Google Gemini con un prompt de experto en agricultura para entregar recomendaciones prácticas basadas en los datos proporcionados.
+Una API en FastAPI que envuelve Google Gemini para entregar orientación educativa y, cuando se proporcionan lecturas de sensores, recomendaciones direccionales estructuradas (increase/decrease/maintain) con rango objetivo orientativo.
 
 ## Requisitos
 - Python 3.10+
@@ -92,8 +92,14 @@ Notas para serverless:
 - question (str, requerido)
 - crop (str, opcional)
 - temperature (float, opcional)
-- safe_mode (bool, opcional, por defecto true): fuerza redacción educativa no prescriptiva y un reintento seguro si la respuesta es bloqueada por políticas.
-- length ("short" | "medium", opcional): controla la concisión de la salida. "short" produce 3-4 bullets compactos; "medium" entrega un desarrollo breve con bullets concisos.
+- safe_mode (bool, opcional, por defecto true)
+- length ("short" | "medium", opcional)
+- parameter (str, opcional): nombre del parámetro medido (soil_moisture, air_temperature, soil_temperature, air_humidity, soil_ph, ec, ndvi, rain, vpd, other)
+- value (float, opcional): valor observado del parámetro
+- unit (str, opcional): unidad del parámetro (%, °C, pH, dS/m, mm, etc.)
+- stage (str, opcional): etapa fenológica (ej. V6, floración)
+
+Si se incluyen `parameter` y `value`, la API intenta devolver un objeto estructurado `recommendation` además del campo `answer` textual.
 
 ### Ejemplo (PowerShell)
 ```powershell
@@ -106,7 +112,37 @@ $body = @{
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/v1/agro/ask" -Method Post -Body $body -ContentType "application/json"
 ```
 
-Ejemplo con salida más concisa (length="short"):
+Ejemplo educativo conciso (length="short"):
+Ejemplo con recomendación estructurada (sensor):
+```powershell
+$body = @{
+  question = "Lectura de humedad de suelo para maíz V6"
+  crop = "maíz"
+  stage = "V6"
+  parameter = "soil_moisture"
+  value = 18.5
+  unit = "%"
+  temperature = 26
+} | ConvertTo-Json -Depth 4
+
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/v1/agro/ask" -Method Post -Body $body -ContentType "application/json"
+```
+Respuesta esperada (ejemplo):
+```json
+{
+  "answer": "Sugerencia: aumentar soil_moisture. Rango objetivo: 20–30 %. Valor observado por debajo del intervalo típico para maíz en fase vegetativa temprana.",
+  "model": "gemini-2.5-flash",
+  "recommendation": {
+    "action": "increase",
+    "parameter": "soil_moisture",
+    "target_range": {"min": 20.0, "max": 30.0, "unit": "%"},
+    "rationale": "El valor 18.5% está ligeramente por debajo del rango general orientativo (20–30%) para soporte óptimo de crecimiento vegetativo.",
+    "warnings": ["Rango genérico: ajustar según textura y capacidad de campo específica."]
+  }
+}
+```
+
+Nota: Los rangos son orientativos y pueden variar por suelo, clima y manejo local; la salida evita dosis o instrucciones operativas específicas.
 ```powershell
 $body = @{
   question = "Como ejemplo teórico, pautas generales de riego para maíz en etapa vegetativa."

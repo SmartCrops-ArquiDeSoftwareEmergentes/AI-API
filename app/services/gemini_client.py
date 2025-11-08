@@ -8,7 +8,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.config import get_settings
 from app.schemas.requests import AskRequest
-from app.schemas.responses import AskResponse
+from app.schemas.responses import AskResponse, Recommendation, TargetRange
 from app.utils.logger import get_logger
 from app.utils.sanitize import sanitize_question, sanitize_data_preview
 
@@ -129,7 +129,27 @@ class GeminiClient:
             )
         return "\n\n".join(parts)
 
-    def _build_generation_config(self, *, length: Optional[str] = None) -> Dict[str, Any]:
+    def _compose_adjustment_prompt(self, req: AskRequest) -> str:
+        """Prompt específico para obtener una recomendación direccional estructurada en JSON."""
+        pv = {
+            "crop": req.crop,
+            "parameter": req.parameter,
+            "value": req.value,
+            "unit": req.unit,
+            "stage": getattr(req, "stage", None),
+            "temperature": req.temperature,
+        }
+        preview = sanitize_data_preview({k: v for k, v in pv.items() if v is not None}, max_chars=800)
+        instructions = (
+            "Tarea: Con base en el parámetro medido y el cultivo, devuelve SOLO un JSON válido que indique si se debe aumentar, "
+            "disminuir o mantener el parámetro, más un rango objetivo orientativo, justificación breve y advertencias. "
+            "Sigue el esquema indicado en la instrucción del sistema. No incluyas texto fuera del JSON."
+        )
+        return (
+            f"Datos: {preview}\n\n" + instructions
+        )
+
+    def _build_generation_config(self, *, length: Optional[str] = None, json_output: bool = False) -> Dict[str, Any]:
         max_tokens = 900
         temperature = 0.2
         top_p = 0.9
@@ -139,12 +159,15 @@ class GeminiClient:
             top_p = 0.7
         elif length == "medium" or length is None:
             max_tokens = 900
-        return {
+        cfg = {
             "temperature": temperature,
             "top_p": top_p,
             "top_k": 40,
             "max_output_tokens": max_tokens,
         }
+        if json_output:
+            cfg["response_mime_type"] = "application/json"
+        return cfg
 
     def _safety_settings(self) -> List[Dict[str, str]]:
         # Relax safety just to block only high-likelihood harmful content, reducing false positives
@@ -154,6 +177,61 @@ class GeminiClient:
             {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"},
             {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH"},
         ]
+
+    def _heuristic_recommendation(self, req: AskRequest) -> Recommendation | None:
+        """Fallback simple y seguro basado en rangos orientativos genéricos.
+        No sustituye al modelo, pero mejora la UX cuando no hay JSON.
+        """
+        if not req.parameter or req.value is None:
+            return None
+        p = (req.parameter or "").lower()
+        unit = req.unit
+        v = req.value
+
+        # Rangos orientativos genéricos (no prescriptivos)
+        ranges: Dict[str, Dict[str, float | None]] = {
+            "soil_moisture": {"min": 20.0, "max": 30.0},  # %
+            "air_temperature": {"min": 18.0, "max": 30.0},  # °C
+            "soil_temperature": {"min": 15.0, "max": 25.0},  # °C
+            "air_humidity": {"min": 50.0, "max": 80.0},  # %
+            "soil_ph": {"min": 6.0, "max": 7.5},  # pH
+            "ec": {"min": 0.8, "max": 2.5},  # dS/m
+            "ndvi": {"min": 0.5, "max": 0.9},  # adim.
+            "vpd": {"min": 0.8, "max": 1.5},  # kPa
+        }
+
+        r = ranges.get(p)
+        if not r:
+            return None
+        tmin = r.get("min")
+        tmax = r.get("max")
+        action = "maintain"
+        if tmin is not None and v < tmin:
+            action = "increase"
+        elif tmax is not None and v > tmax:
+            action = "decrease"
+
+        rationale = []
+        if tmin is not None and tmax is not None:
+            rationale.append(f"El valor observado ({v}{' ' + unit if unit else ''}) se compara con un rango orientativo de {tmin}–{tmax}{' ' + unit if unit else ''}.")
+        elif tmin is not None:
+            rationale.append(f"El valor observado ({v}{' ' + unit if unit else ''}) se compara con un mínimo orientativo de {tmin}{' ' + unit if unit else ''}.")
+        elif tmax is not None:
+            rationale.append(f"El valor observado ({v}{' ' + unit if unit else ''}) se compara con un máximo orientativo de {tmax}{' ' + unit if unit else ''}.")
+
+        warns = [
+            "Rangos genéricos de referencia; ajustar según cultivo, etapa fenológica, tipo de suelo y sistema de manejo.",
+        ]
+        if p in ("ndvi",):
+            warns.append("NDVI es un índice; la acción depende del diagnóstico agronómico complementario.")
+
+        return Recommendation(
+            action=action,
+            parameter=p,
+            target_range=TargetRange(min=tmin, max=tmax, unit=unit),
+            rationale=" ".join(rationale),
+            warnings=warns,
+        )
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=0.5, min=0.5, max=4), reraise=True)
     def _call_gemini(self, user_prompt: str, *, allow_reframe: bool = True, length: Optional[str] = None) -> AskResponse:
@@ -335,11 +413,83 @@ class GeminiClient:
 
         return AskResponse(answer=answer.strip(), model=self.settings.gemini_model, usage=usage, tips=None)
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=0.5, min=0.5, max=4), reraise=True)
+    def _call_gemini_structured(self, user_prompt: str) -> Recommendation | None:
+        """Solicita salida JSON y la transforma en Recommendation."""
+        config = self._build_generation_config(length="short", json_output=True)
+        try:
+            response = self._model.generate_content(
+                user_prompt,
+                generation_config=config,
+                safety_settings=self._safety_settings(),
+            )
+        except Exception as e:
+            logger.exception("Gemini structured call failed: %s", e)
+            raise
+
+        # Intentar extraer JSON desde parts
+        raw = None
+        try:
+            candidates = getattr(response, "candidates", None) or []
+            if candidates:
+                first = candidates[0]
+                content = getattr(first, "content", None)
+                parts = getattr(content, "parts", []) if content else []
+                for p in parts:
+                    t = getattr(p, "text", None)
+                    if isinstance(t, str) and t.strip():
+                        raw = t
+                        break
+                    elif isinstance(p, str) and p.strip():
+                        raw = p
+                        break
+        except Exception:
+            pass
+        if not raw:
+            # Algunos SDK retornan directamente .text
+            try:
+                raw = getattr(response, "text", None)
+            except Exception:
+                raw = None
+        if not raw:
+            return None
+
+        try:
+            data = json.loads(raw)
+        except Exception:
+            # Intento de limpieza mínima si viene con formateo alrededor
+            try:
+                raw2 = raw.strip()
+                if raw2.startswith("```"):
+                    raw2 = raw2.strip("`\n ")
+                    if raw2.startswith("json"):
+                        raw2 = raw2[4:].lstrip()
+                data = json.loads(raw2)
+            except Exception:
+                logger.debug("Structured response is not valid JSON: %s", raw[:200])
+                return None
+
+        try:
+            target = None
+            tr = data.get("target_range") if isinstance(data, dict) else None
+            if isinstance(tr, dict):
+                target = TargetRange(min=tr.get("min"), max=tr.get("max"), unit=tr.get("unit"))
+            rec = Recommendation(
+                action=data.get("action"),
+                parameter=data.get("parameter"),
+                target_range=target,
+                rationale=data.get("rationale"),
+                warnings=data.get("warnings"),
+            )
+            return rec
+        except Exception as e:
+            logger.debug("Failed to map structured JSON to Recommendation: %s", e)
+            return None
+
     def ask(self, req: AskRequest) -> AskResponse:
         if len(req.question) > self.settings.max_input_chars:
             raise ValueError("La pregunta es demasiado larga. Reduce el tamaño del texto.")
 
-        user_prompt = self._compose_user_prompt(req)
         length = getattr(req, "length", None) or "medium"
 
         # If already in mock mode, return a deterministic demo response
@@ -350,12 +500,19 @@ class GeminiClient:
                 "Especifica el estado fenológico del cultivo para recomendaciones más precisas.",
             ]
             answer = (
-                "[MODO DEMO] Recomendación preliminar para agricultura basada en la información disponible. "
-                "Agrega tu GEMINI_API_KEY en .env para respuestas reales.\n\n"
-                f"Resumen: {req.question[:180]}...\n\n"
-                "Siguiente paso: proporciona datos de suelo y clima para ajustar dosis y calendario."
+                "[MODO DEMO] Resumen preliminar. Agrega tu GEMINI_API_KEY en .env para respuestas reales.\n\n"
+                f"Resumen: {req.question[:180]}..."
             )
-            return AskResponse(answer=answer, model=self.settings.gemini_model, usage=None, tips=tips)
+            recommendation = None
+            if req.parameter and req.value is not None:
+                recommendation = Recommendation(
+                    action="maintain",
+                    parameter=req.parameter,
+                    target_range=TargetRange(min=None, max=None, unit=req.unit),
+                    rationale="Demo: sin modelo real, se sugiere mantener de forma conservadora.",
+                    warnings=["MODO DEMO: sin análisis del modelo"],
+                )
+            return AskResponse(answer=answer, model=self.settings.gemini_model, usage=None, tips=tips, recommendation=recommendation)
 
         # Ensure client is configured; on failure, configuration can toggle mock_mode
         self._configure()
@@ -374,4 +531,46 @@ class GeminiClient:
             )
             return AskResponse(answer=answer, model=self.settings.gemini_model, usage=None, tips=tips)
 
+        # Si se proporcionan parámetros medibles, intentar flujo estructurado primero
+        if req.parameter and (req.value is not None):
+            try:
+                prompt = self._compose_adjustment_prompt(req)
+                rec = self._call_gemini_structured(prompt)
+            except Exception:
+                rec = None
+            if rec is None:
+                # Aplicar heurística segura si el modelo no devolvió JSON
+                rec = self._heuristic_recommendation(req)
+            # Generar además un resumen en texto breve (por si el cliente lo usa)
+            text_summary = None
+            if rec:
+                action_es = {
+                    "increase": "aumentar",
+                    "decrease": "disminuir",
+                    "maintain": "mantener",
+                }.get((rec.action or "").lower(), rec.action)
+                tr = rec.target_range
+                rango = None
+                if tr and (tr.min is not None or tr.max is not None):
+                    if tr.min is not None and tr.max is not None:
+                        rango = f"{tr.min}–{tr.max} {tr.unit or ''}".strip()
+                    elif tr.min is not None:
+                        rango = f">= {tr.min} {tr.unit or ''}".strip()
+                    elif tr.max is not None:
+                        rango = f"<= {tr.max} {tr.unit or ''}".strip()
+                text_summary = (
+                    f"Sugerencia: {action_es or '—'} {rec.parameter or ''}. "
+                    + (f"Rango objetivo: {rango}. " if rango else "")
+                    + (rec.rationale or "")
+                ).strip()
+                return AskResponse(
+                    answer=text_summary or (rec.rationale or ""),
+                    model=self.settings.gemini_model,
+                    usage=None,
+                    tips=None,
+                    recommendation=rec,
+                )
+            # Si no se logró JSON válido, continuar con el flujo textual educativo
+
+        user_prompt = self._compose_user_prompt(req)
         return self._call_gemini(user_prompt, allow_reframe=bool(getattr(req, "safe_mode", True)), length=length)
