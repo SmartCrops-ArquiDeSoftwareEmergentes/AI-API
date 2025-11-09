@@ -13,9 +13,9 @@ class TargetRange(BaseModel):
 class Recommendation(BaseModel):
     action: Optional[str] = Field(
         None,
-        description="Acción sugerida: increase | decrease | maintain"
+        description="Acción sugerida: aumentar | disminuir | mantener (si viene en inglés, se convierte a español)"
     )
-    parameter: Optional[str] = Field(None, description="Nombre del parámetro evaluado")
+    parameter: Optional[str] = Field(None, description="Nombre del parámetro evaluado (devuelto en español)")
     target_range: Optional[TargetRange] = Field(None, description="Rango orientativo para el parámetro")
     rationale: Optional[str] = Field(None, description="Breve justificación basada en el valor y el rango")
     warnings: Optional[List[str]] = Field(default=None, description="Lista de advertencias o supuestos")

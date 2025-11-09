@@ -16,9 +16,13 @@ async def main():
             return
 
         payload = {
-            "question": "Tengo maíz en V6 con hojas amarillas en bordes. ¿Qué hago?",
+            "question": "Lectura de humedad de suelo para maíz V6",
             "crop": "maíz",
-            "temperature": 28
+            "stage": "V6",
+            "parameter": "humedad_suelo",
+            "value": 18.5,
+            "unit": "%",
+            "temperature": 26
         }
         r = await client.post(f"{base}/v1/agro/ask", json=payload)
         print("Status:", r.status_code)

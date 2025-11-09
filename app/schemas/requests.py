@@ -15,19 +15,13 @@ class AskRequest(BaseModel):
     )
     # Campos opcionales para lecturas de sensores y ajustes dirigidos
     parameter: Optional[Literal[
-        "soil_moisture",
-        "air_temperature",
-        "soil_temperature",
-        "air_humidity",
-        "soil_ph",
-        "ec",
-        "ndvi",
-        "rain",
-        "vpd",
-        "other",
+        # Inglés (compatibilidad hacia atrás)
+        "soil_moisture", "air_temperature", "soil_temperature", "air_humidity", "soil_ph", "ec", "ndvi", "rain", "vpd", "other",
+        # Español (nuevo)
+        "humedad_suelo", "temperatura_aire", "temperatura_suelo", "humedad_aire", "ph_suelo", "ce", "ndvi", "lluvia", "vpd", "otro"
     ]] = Field(
         None,
-        description="Nombre del parámetro medido (si se busca una recomendación de ajuste)."
+        description="Nombre del parámetro medido (acepta inglés o español)."
     )
     value: Optional[float] = Field(
         None,
@@ -41,3 +35,23 @@ class AskRequest(BaseModel):
         None,
         description="Etapa fenológica (opcional), p. ej., V6, floración, cuaje, etc."
     )
+
+    @classmethod
+    def _map_parameter(cls, value: Optional[str]) -> Optional[str]:
+        if not value:
+            return value
+        mapping = {
+            "humedad_suelo": "soil_moisture",
+            "temperatura_aire": "air_temperature",
+            "temperatura_suelo": "soil_temperature",
+            "humedad_aire": "air_humidity",
+            "ph_suelo": "soil_ph",
+            "lluvia": "rain",
+            "otro": "other",
+        }
+        return mapping.get(value, value)
+
+    def model_post_init(self, __context):  # pydantic v2 hook
+        # Normaliza a forma inglesa interna para la lógica del modelo, manteniendo el valor original disponible en output
+        if self.parameter:
+            object.__setattr__(self, "parameter", self._map_parameter(self.parameter))

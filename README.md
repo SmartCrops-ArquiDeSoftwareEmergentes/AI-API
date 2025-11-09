@@ -94,7 +94,7 @@ Notas para serverless:
 - temperature (float, opcional)
 - safe_mode (bool, opcional, por defecto true)
 - length ("short" | "medium", opcional)
-- parameter (str, opcional): nombre del parámetro medido (soil_moisture, air_temperature, soil_temperature, air_humidity, soil_ph, ec, ndvi, rain, vpd, other)
+- parameter (str, opcional): nombre del parámetro medido (usar español preferentemente: humedad_suelo, temperatura_aire, temperatura_suelo, humedad_aire, ph_suelo, ce, ndvi, lluvia, vpd, otro)
 - value (float, opcional): valor observado del parámetro
 - unit (str, opcional): unidad del parámetro (%, °C, pH, dS/m, mm, etc.)
 - stage (str, opcional): etapa fenológica (ej. V6, floración)
@@ -127,14 +127,14 @@ $body = @{
 
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/v1/agro/ask" -Method Post -Body $body -ContentType "application/json"
 ```
-Respuesta esperada (ejemplo):
+Respuesta esperada (ejemplo en español):
 ```json
 {
-  "answer": "Sugerencia: aumentar soil_moisture. Rango objetivo: 20–30 %. Valor observado por debajo del intervalo típico para maíz en fase vegetativa temprana.",
+  "answer": "Sugerencia: aumentar humedad_suelo. Rango objetivo: 20–30 %. Valor observado por debajo del intervalo típico para maíz en fase vegetativa temprana.",
   "model": "gemini-2.5-flash",
   "recommendation": {
-    "action": "increase",
-    "parameter": "soil_moisture",
+  "action": "aumentar",
+  "parameter": "humedad_suelo",
     "target_range": {"min": 20.0, "max": 30.0, "unit": "%"},
     "rationale": "El valor 18.5% está ligeramente por debajo del rango general orientativo (20–30%) para soporte óptimo de crecimiento vegetativo.",
     "warnings": ["Rango genérico: ajustar según textura y capacidad de campo específica."]

@@ -205,11 +205,11 @@ class GeminiClient:
             return None
         tmin = r.get("min")
         tmax = r.get("max")
-        action = "maintain"
+        action = "mantener"
         if tmin is not None and v < tmin:
-            action = "increase"
+            action = "aumentar"
         elif tmax is not None and v > tmax:
-            action = "decrease"
+            action = "disminuir"
 
         rationale = []
         if tmin is not None and tmax is not None:
@@ -225,9 +225,23 @@ class GeminiClient:
         if p in ("ndvi",):
             warns.append("NDVI es un índice; la acción depende del diagnóstico agronómico complementario.")
 
+        # Mapear parámetro interno inglés→español si es necesario
+        param_map = {
+            "soil_moisture": "humedad_suelo",
+            "air_temperature": "temperatura_aire",
+            "soil_temperature": "temperatura_suelo",
+            "air_humidity": "humedad_aire",
+            "soil_ph": "ph_suelo",
+            "ec": "ce",
+            "ndvi": "ndvi",
+            "rain": "lluvia",
+            "vpd": "vpd",
+            "other": "otro",
+        }
+        p_es = param_map.get(p, p)
         return Recommendation(
             action=action,
-            parameter=p,
+            parameter=p_es,
             target_range=TargetRange(min=tmin, max=tmax, unit=unit),
             rationale=" ".join(rationale),
             warnings=warns,
@@ -474,9 +488,29 @@ class GeminiClient:
             tr = data.get("target_range") if isinstance(data, dict) else None
             if isinstance(tr, dict):
                 target = TargetRange(min=tr.get("min"), max=tr.get("max"), unit=tr.get("unit"))
+
+            action_raw = (data.get("action") or "").lower()
+            action_map = {"increase": "aumentar", "decrease": "disminuir", "maintain": "mantener"}
+            action_es = action_map.get(action_raw, action_raw)
+
+            param_raw = (data.get("parameter") or "").lower()
+            param_map = {
+                "soil_moisture": "humedad_suelo",
+                "air_temperature": "temperatura_aire",
+                "soil_temperature": "temperatura_suelo",
+                "air_humidity": "humedad_aire",
+                "soil_ph": "ph_suelo",
+                "ec": "ce",
+                "ndvi": "ndvi",
+                "rain": "lluvia",
+                "vpd": "vpd",
+                "other": "otro",
+            }
+            param_es = param_map.get(param_raw, param_raw)
+
             rec = Recommendation(
-                action=data.get("action"),
-                parameter=data.get("parameter"),
+                action=action_es,
+                parameter=param_es,
                 target_range=target,
                 rationale=data.get("rationale"),
                 warnings=data.get("warnings"),
@@ -544,11 +578,7 @@ class GeminiClient:
             # Generar además un resumen en texto breve (por si el cliente lo usa)
             text_summary = None
             if rec:
-                action_es = {
-                    "increase": "aumentar",
-                    "decrease": "disminuir",
-                    "maintain": "mantener",
-                }.get((rec.action or "").lower(), rec.action)
+                action_es = rec.action  # Ya normalizada a español
                 tr = rec.target_range
                 rango = None
                 if tr and (tr.min is not None or tr.max is not None):
