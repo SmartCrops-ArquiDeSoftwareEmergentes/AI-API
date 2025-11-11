@@ -198,9 +198,9 @@ class GeminiClient:
             "ndvi": {"min": 0.5, "max": 0.9},  # índice NDVI
             "vpd": {"min": 0.8, "max": 1.5},  # kPa déficit de presión de vapor
             # parámetros nuevos sin rango explícito → se dejan null para no inventar
-            "light": {"min": None, "max": None},  # luz/luminosidad (depende del cultivo y sensor)
-            "rain": {"min": None, "max": None},  # lluvia puntual (mm)
-            "nutrients": {"min": None, "max": None},  # nivel agregado de nutrientes (muy dependiente de análisis)
+                "rain": {"min": None, "max": None},  # lluvia puntual (mm)
+                "light": {"min": None, "max": None},  # luz/luminosidad (depende del cultivo y sensor)
+                "nutrients": {"min": None, "max": None},  # nivel agregado de nutrientes (muy dependiente de análisis)
         }
 
         r = ranges.get(p)
@@ -246,6 +246,8 @@ class GeminiClient:
             "ec": "ce",
             "ndvi": "ndvi",
             "rain": "lluvia",
+                "light": "luz",
+                "nutrients": "nutrientes",
             "vpd": "vpd",
             "other": "otro",
         }
@@ -514,6 +516,8 @@ class GeminiClient:
                 "ec": "ce",
                 "ndvi": "ndvi",
                 "rain": "lluvia",
+                "light": "luz",
+                "nutrients": "nutrientes",
                 "vpd": "vpd",
                 "other": "otro",
             }
