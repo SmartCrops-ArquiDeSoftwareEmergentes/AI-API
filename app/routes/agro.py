@@ -24,9 +24,12 @@ async def health():
 async def ask(req: AskRequest):
     settings = get_settings()
 
-    if not req.question or not req.question.strip():
-        raise HTTPException(status_code=400, detail="Se requiere 'question'.")
-    if len(req.question) > settings.max_input_chars:
+    # Validación flexible: requiere 'question' o (parameter y value)
+    has_question = bool(req.question and req.question.strip())
+    has_measure = bool(req.parameter and (req.value is not None))
+    if not has_question and not has_measure:
+        raise HTTPException(status_code=400, detail="Debes enviar 'question' o bien 'parameter' y 'value'.")
+    if has_question and len(req.question) > settings.max_input_chars:
         raise HTTPException(status_code=400, detail="La pregunta es demasiado larga.")
 
     try:

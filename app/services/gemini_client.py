@@ -132,18 +132,17 @@ class GeminiClient:
     def _compose_adjustment_prompt(self, req: AskRequest) -> str:
         """Prompt específico para obtener una recomendación direccional estructurada en JSON."""
         pv = {
-            "crop": req.crop,
-            "parameter": req.parameter,
-            "value": req.value,
-            "unit": req.unit,
-            "stage": getattr(req, "stage", None),
-            "temperature": req.temperature,
+            "cultivo": req.crop,
+            "parametro": req.parameter,
+            "valor": req.value,
+            "unidad": req.unit,
+            "etapa": getattr(req, "stage", None),
+            "temperatura": req.temperature,
         }
         preview = sanitize_data_preview({k: v for k, v in pv.items() if v is not None}, max_chars=800)
         instructions = (
-            "Tarea: Con base en el parámetro medido y el cultivo, devuelve SOLO un JSON válido que indique si se debe aumentar, "
-            "disminuir o mantener el parámetro, más un rango objetivo orientativo, justificación breve y advertencias. "
-            "Sigue el esquema indicado en la instrucción del sistema. No incluyas texto fuera del JSON."
+            "Tarea: Con base en el parámetro medido y el cultivo, devuelve SOLO un JSON válido en español que indique si se debe 'aumentar', 'disminuir' o 'mantener' el parámetro, con rango objetivo orientativo, justificación breve y advertencias. "
+            "Sigue exactamente el esquema indicado en la instrucción del sistema. No incluyas texto fuera del JSON." 
         )
         return (
             f"Datos: {preview}\n\n" + instructions
@@ -190,14 +189,18 @@ class GeminiClient:
 
         # Rangos orientativos genéricos (no prescriptivos)
         ranges: Dict[str, Dict[str, float | None]] = {
-            "soil_moisture": {"min": 20.0, "max": 30.0},  # %
-            "air_temperature": {"min": 18.0, "max": 30.0},  # °C
-            "soil_temperature": {"min": 15.0, "max": 25.0},  # °C
-            "air_humidity": {"min": 50.0, "max": 80.0},  # %
-            "soil_ph": {"min": 6.0, "max": 7.5},  # pH
-            "ec": {"min": 0.8, "max": 2.5},  # dS/m
-            "ndvi": {"min": 0.5, "max": 0.9},  # adim.
-            "vpd": {"min": 0.8, "max": 1.5},  # kPa
+            "soil_moisture": {"min": 20.0, "max": 30.0},  # % humedad de suelo
+            "air_temperature": {"min": 18.0, "max": 30.0},  # °C temperatura aire
+            "soil_temperature": {"min": 15.0, "max": 25.0},  # °C temperatura suelo
+            "air_humidity": {"min": 50.0, "max": 80.0},  # % humedad aire (HR)
+            "soil_ph": {"min": 6.0, "max": 7.5},  # pH suelo
+            "ec": {"min": 0.8, "max": 2.5},  # dS/m conductividad eléctrica
+            "ndvi": {"min": 0.5, "max": 0.9},  # índice NDVI
+            "vpd": {"min": 0.8, "max": 1.5},  # kPa déficit de presión de vapor
+            # parámetros nuevos sin rango explícito → se dejan null para no inventar
+            "light": {"min": None, "max": None},  # luz/luminosidad (depende del cultivo y sensor)
+            "rain": {"min": None, "max": None},  # lluvia puntual (mm)
+            "nutrients": {"min": None, "max": None},  # nivel agregado de nutrientes (muy dependiente de análisis)
         }
 
         r = ranges.get(p)
@@ -218,10 +221,18 @@ class GeminiClient:
             rationale.append(f"El valor observado ({v}{' ' + unit if unit else ''}) se compara con un mínimo orientativo de {tmin}{' ' + unit if unit else ''}.")
         elif tmax is not None:
             rationale.append(f"El valor observado ({v}{' ' + unit if unit else ''}) se compara con un máximo orientativo de {tmax}{' ' + unit if unit else ''}.")
+        else:
+            rationale.append("No hay rango genérico confiable; se sugiere monitoreo adicional y contextualizar según cultivo y etapa.")
 
         warns = [
             "Rangos genéricos de referencia; ajustar según cultivo, etapa fenológica, tipo de suelo y sistema de manejo.",
         ]
+        if p in ("light",):
+            warns.append("La iluminación óptima depende de cultivo, intensidad fotosintética (PPFD) y duración; calibrar con curvas específicas.")
+        if p in ("nutrients",):
+            warns.append("El valor de 'nutrients' requiere desagregar tipo de nutriente y comparar con análisis de suelo y foliar.")
+        if p in ("rain",):
+            warns.append("La lluvia puntual debe interpretarse junto a humedad del suelo y pronóstico; no indica acción directa por sí sola.")
         if p in ("ndvi",):
             warns.append("NDVI es un índice; la acción depende del diagnóstico agronómico complementario.")
 
@@ -521,7 +532,7 @@ class GeminiClient:
             return None
 
     def ask(self, req: AskRequest) -> AskResponse:
-        if len(req.question) > self.settings.max_input_chars:
+        if req.question and len(req.question) > self.settings.max_input_chars:
             raise ValueError("La pregunta es demasiado larga. Reduce el tamaño del texto.")
 
         length = getattr(req, "length", None) or "medium"
@@ -567,13 +578,15 @@ class GeminiClient:
 
         # Si se proporcionan parámetros medibles, intentar flujo estructurado primero
         if req.parameter and (req.value is not None):
+            prompt = self._compose_adjustment_prompt(req)
+            rec = None
+            # Intento principal modelo
             try:
-                prompt = self._compose_adjustment_prompt(req)
                 rec = self._call_gemini_structured(prompt)
             except Exception:
                 rec = None
+            # Si falla el modelo o JSON inválido, usar heurística
             if rec is None:
-                # Aplicar heurística segura si el modelo no devolvió JSON
                 rec = self._heuristic_recommendation(req)
             # Generar además un resumen en texto breve (por si el cliente lo usa)
             text_summary = None
