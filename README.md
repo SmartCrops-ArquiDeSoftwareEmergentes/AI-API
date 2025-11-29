@@ -33,21 +33,39 @@ Este proyecto está listo para ser desplegado como Función Serverless de Python
 - Configuración de rutas: `vercel.json` redirige todo a `api/index.py`.
 - Requisitos en Vercel: Vercel instala automáticamente las dependencias detectando `requirements.txt`.
 
-Pasos:
-1) Inicia sesión en Vercel (CLI) y despliega.
+### ⚠️ Importante: Historial en Vercel
+El sistema de historial SQLite **NO funciona en Vercel** (serverless). Se debe deshabilitar con la variable `ENABLE_HISTORY=false`.
 
-```cmd
-vercel login
-vercel --prod
+### Variables de entorno REQUERIDAS en Vercel:
+```bash
+GEMINI_API_KEY = tu_clave_real       # Obligatoria
+MOCK_MODE = false                     # Para usar Gemini real
+ENABLE_HISTORY = false                # IMPORTANTE: Deshabilitar historial
 ```
 
-2) Variables de entorno en Vercel (Dashboard o CLI):
-- `GEMINI_API_KEY`: tu clave de Google AI Studio (opcional si usas demo).
+### Variables opcionales:
 - `MODEL` (opcional): por defecto `gemini-1.5-pro-latest` (recomendado: `gemini-2.5-flash`).
-- `MOCK_MODE`: `true` (demo) o `false` (real).
 - `LOG_LEVEL` (opcional): `INFO` por defecto.
 - `TIMEOUT_S` (opcional): `30` por defecto.
 - `MAX_INPUT_CHARS` (opcional): `12000` por defecto.
+
+### Pasos de despliegue:
+
+**Opción 1: CLI (Rápido)**
+```cmd
+vercel login
+vercel env add GEMINI_API_KEY production    # Pega tu clave
+vercel env add MOCK_MODE production         # Escribe: false
+vercel env add ENABLE_HISTORY production    # Escribe: false
+vercel --prod
+```
+
+**Opción 2: Dashboard de Vercel**
+1. Ve a Settings → Environment Variables
+2. Agrega las 3 variables requeridas
+3. Redeploy desde Deployments
+
+📖 **Guía completa**: Ver [`docs/VERCEL_DEPLOYMENT.md`](docs/VERCEL_DEPLOYMENT.md)
 
 3) Probar endpoints desplegados (reemplaza la URL):
 ```powershell
@@ -88,6 +106,13 @@ Notas para serverless:
 - GET `/health` → Estado del servicio, modelo y modo demo
 - POST `/v1/agro/chat` → **Consulta de texto libre** (chatbot/textbox simple)
 - POST `/v1/agro/ask` → Recomendaciones con sensores o respuesta educativa
+- GET `/v1/agro/history` → **Historial de conversaciones** (nuevo!)
+- GET `/v1/agro/history/{chat_id}` → Detalle de una conversación específica
+- GET `/v1/agro/sensors/history` → Historial de lecturas de sensores
+- GET `/v1/agro/stats` → Estadísticas de uso
+- GET `/v1/agro/search` → Búsqueda en historial
+
+Ver documentación completa de historial en [`docs/HISTORY_API.md`](docs/HISTORY_API.md).
 
 ### Diferencias entre endpoints
 **`/v1/agro/chat`**: Para preguntas generales en texto libre sin datos de sensores.

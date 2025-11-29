@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     timeout_s: float = Field(default=30.0, validation_alias="TIMEOUT_S")
     max_input_chars: int = Field(default=12000, validation_alias="MAX_INPUT_CHARS")
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
+    enable_history: bool = Field(default=True, validation_alias="ENABLE_HISTORY")
 
     # pydantic-settings v2 style configuration
     model_config = SettingsConfigDict(
