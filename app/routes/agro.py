@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException
 from app.config import get_settings
 from app.schemas.requests import AskRequest
 from app.schemas.responses import AskResponse
+from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.gemini_client import GeminiClient
 
 router = APIRouter()
@@ -22,6 +23,12 @@ async def health():
 
 @router.post("/v1/agro/ask", response_model=AskResponse)
 async def ask(req: AskRequest):
+    """
+    Endpoint principal para recomendaciones agrícolas.
+    
+    - Con datos de sensores (parameter + value): devuelve recomendación estructurada.
+    - Solo con pregunta: devuelve respuesta educativa.
+    """
     settings = get_settings()
 
     # Validación flexible: requiere 'question' o (parameter y value)
@@ -36,6 +43,43 @@ async def ask(req: AskRequest):
         client = GeminiClient(prompt_path=PROMPT_PATH)
         resp = client.ask(req)
         return resp
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve)) from ve
+    except Exception as e:
+        raise HTTPException(status_code=502, detail="Error al consultar el modelo.") from e
+
+
+@router.post("/v1/agro/chat", response_model=ChatResponse)
+async def chat(req: ChatRequest):
+    """
+    Endpoint simplificado para consultas de texto libre (sin datos de sensores).
+    
+    El usuario solo envía una pregunta en lenguaje natural y recibe una respuesta educativa.
+    Ideal para casos de uso tipo chatbot o textbox en el frontend.
+    """
+    settings = get_settings()
+    
+    if len(req.question) > settings.max_input_chars:
+        raise HTTPException(status_code=400, detail="La pregunta es demasiado larga.")
+    
+    try:
+        client = GeminiClient(prompt_path=PROMPT_PATH)
+        # Convertir ChatRequest a AskRequest para reutilizar la lógica existente
+        ask_req = AskRequest(
+            question=req.question,
+            crop=req.crop,
+            stage=req.stage,
+            length=req.length,
+            safe_mode=req.safe_mode
+        )
+        resp = client.ask(ask_req)
+        
+        # Convertir AskResponse a ChatResponse (solo campos relevantes)
+        return ChatResponse(
+            answer=resp.answer,
+            model=resp.model,
+            tips=resp.tips
+        )
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve)) from ve
     except Exception as e:

@@ -92,13 +92,61 @@ class GeminiClient:
             logger.exception("Failed to configure Gemini: %s", e)
             self.settings.mock_mode = True
 
+    def _compose_chat_prompt(self, req: AskRequest) -> str:
+        """Prompt flexible y conversacional para consultas de texto libre (endpoint /chat)."""
+        parts: List[str] = []
+        # Educational, non-prescriptive framing to reduce safety blocks
+        parts.append(
+            "Contexto educativo: Esta consulta es únicamente informativa y de ejemplo teórico para agricultura. "
+            "No contiene datos personales ni requiere instrucciones operativas. Evita nombres comerciales o marcas; no incluyas cantidades numéricas exactas, calendarios específicos ni instrucciones paso a paso detalladas. "
+            "Responde en tono conversacional y educativo, usando lenguaje condicional (\"podría\", \"en general\", \"como referencia\") y con foco en buenas prácticas."
+        )
+        if req.crop:
+            parts.append(f"Cultivo: {req.crop}")
+        if getattr(req, "stage", None):
+            parts.append(f"Etapa: {req.stage}")
+        safe_q = sanitize_question(req.question, max_len=min(800, self.settings.max_input_chars))
+        parts.append(f"Pregunta: {safe_q}")
+        
+        # Flexible output guidance - permite variedad en formato
+        parts.append(
+            "Guía de respuesta:\n"
+            "Adapta el formato según la naturaleza de la pregunta. Puedes usar:\n"
+            "- Párrafos explicativos para conceptos generales\n"
+            "- Bullets cuando enumeres factores o consideraciones múltiples\n"
+            "- Comparaciones o ejemplos cuando aclaren el punto\n"
+            "- Un tono conversacional que fluya naturalmente\n\n"
+            "Incluye según sea relevante:\n"
+            "• Contexto breve sobre el tema\n"
+            "• Factores clave a considerar (sin forzar enumeración)\n"
+            "• Rangos de referencia si aplican\n"
+            "• Señales de monitoreo útiles\n"
+            "• Riesgos comunes y cómo mitigarlos en términos generales\n\n"
+            "No es necesario cubrir todos estos puntos si no son relevantes para la pregunta específica."
+        )
+        
+        # Length guidance (parametrized)
+        length = getattr(req, "length", None) or "medium"
+        if length == "short":
+            parts.append(
+                "Extensión: Respuesta concisa y directa (~200-400 palabras). "
+                "Ve al punto principal sin rodeos innecesarios."
+            )
+        else:
+            parts.append(
+                "Extensión: Respuesta completa pero bien estructurada (~400-800 palabras). "
+                "Desarrolla los puntos clave sin redundancias."
+            )
+        return "\n\n".join(parts)
+
     def _compose_user_prompt(self, req: AskRequest) -> str:
+        """Prompt estructurado para consultas con datos de sensores (endpoint /ask sin sensores)."""
         parts: List[str] = []
         # Educational, non-prescriptive framing to reduce safety blocks
         parts.append(
             "Contexto educativo: Esta consulta es únicamente informativa y de ejemplo teórico para agricultura. "
             "No contiene datos personales ni requiere instrucciones operativas. Evita nombres comerciales o marcas; no incluyas cantidades numéricas, calendarios ni instrucciones paso a paso. "
-            "Responde en tono no prescriptivo (""podría"", ""en general"", ""como referencia"") y con foco en buenas prácticas."
+            "Responde en tono no prescriptivo (\"podría\", \"en general\", \"como referencia\") y con foco en buenas prácticas."
         )
         if req.crop:
             parts.append(f"Cultivo: {req.crop}")
@@ -148,16 +196,28 @@ class GeminiClient:
             f"Datos: {preview}\n\n" + instructions
         )
 
-    def _build_generation_config(self, *, length: Optional[str] = None, json_output: bool = False) -> Dict[str, Any]:
-        max_tokens = 900
-        temperature = 0.2
-        top_p = 0.9
+    def _build_generation_config(self, *, length: Optional[str] = None, json_output: bool = False, conversational: bool = False) -> Dict[str, Any]:
+        max_tokens = 2048  # Aumentado de 900 a 2048 para respuestas completas
+        
+        # Temperatura más alta para chat conversacional, baja para sensores estructurados
+        if conversational:
+            temperature = 0.4  # Respuestas variadas y naturales
+            top_p = 0.92
+        else:
+            temperature = 0.2  # Consistente para respuestas estructuradas
+            top_p = 0.9
+        
         if length == "short":
-            max_tokens = 520
-            temperature = 0.1
-            top_p = 0.7
+            max_tokens = 1024
+            if conversational:
+                temperature = 0.3
+                top_p = 0.85
+            else:
+                temperature = 0.1
+                top_p = 0.7
         elif length == "medium" or length is None:
-            max_tokens = 900
+            max_tokens = 2048
+        
         cfg = {
             "temperature": temperature,
             "top_p": top_p,
@@ -166,6 +226,7 @@ class GeminiClient:
         }
         if json_output:
             cfg["response_mime_type"] = "application/json"
+            cfg["temperature"] = 0.1  # Bajo para JSON estructurado consistente
         return cfg
 
     def _safety_settings(self) -> List[Dict[str, str]]:
@@ -261,8 +322,8 @@ class GeminiClient:
         )
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=0.5, min=0.5, max=4), reraise=True)
-    def _call_gemini(self, user_prompt: str, *, allow_reframe: bool = True, length: Optional[str] = None) -> AskResponse:
-        config = self._build_generation_config(length=length)
+    def _call_gemini(self, user_prompt: str, *, allow_reframe: bool = True, length: Optional[str] = None, conversational: bool = False) -> AskResponse:
+        config = self._build_generation_config(length=length, conversational=conversational)
         try:
             response = self._model.generate_content(
                 user_prompt,
@@ -619,5 +680,20 @@ class GeminiClient:
                 )
             # Si no se logró JSON válido, continuar con el flujo textual educativo
 
-        user_prompt = self._compose_user_prompt(req)
-        return self._call_gemini(user_prompt, allow_reframe=bool(getattr(req, "safe_mode", True)), length=length)
+        # Usar prompt conversacional si NO hay sensores (chat puro), sino usar prompt estructurado
+        has_sensor_data = bool(req.parameter or req.value is not None)
+        is_conversational = not has_sensor_data
+        
+        if has_sensor_data:
+            user_prompt = self._compose_user_prompt(req)
+        else:
+            # Chat puro: usar prompt flexible y conversacional
+            user_prompt = self._compose_chat_prompt(req)
+        
+        return self._call_gemini(
+            user_prompt, 
+            allow_reframe=bool(getattr(req, "safe_mode", True)), 
+            length=length,
+            conversational=is_conversational
+        )
+

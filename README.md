@@ -85,8 +85,18 @@ Notas para serverless:
 - Si no defines `GEMINI_API_KEY` o hay error al configurar el cliente, la API cae automáticamente en modo demo.
 
 ## Endpoints
-- GET `/health` -> Estado del servicio, modelo y si está en modo demo.
-- POST `/v1/agro/ask` -> Pregunta con contexto agrícola y datos. Responde con recomendaciones.
+- GET `/health` → Estado del servicio, modelo y modo demo
+- POST `/v1/agro/chat` → **Consulta de texto libre** (chatbot/textbox simple)
+- POST `/v1/agro/ask` → Recomendaciones con sensores o respuesta educativa
+
+### Diferencias entre endpoints
+**`/v1/agro/chat`**: Para preguntas generales en texto libre sin datos de sensores.
+- Entrada: solo `question` (+ opcionales `crop`, `stage`, `length`)
+- Salida: `answer` educativo en texto/bullets
+
+**`/v1/agro/ask`**: Para tableros con datos de sensores o consultas mixtas.
+- Entrada: `question` O (`parameter` + `value`)
+- Salida: recomendación estructurada (aumentar/disminuir/mantener) cuando hay sensores, o texto educativo si no
 
 ### Parámetros del body
 - question (str, requerido)
@@ -102,6 +112,19 @@ Notas para serverless:
 Si se incluyen `parameter` y `value`, la API intenta devolver un objeto estructurado `recommendation` además del campo `answer` textual.
 
 ### Ejemplo (PowerShell)
+
+**Chat simple (texto libre):**
+```powershell
+$body = @{
+  question = "¿Qué factores afectan el crecimiento de lechuga en hidroponía?"
+  crop = "lechuga"
+  length = "short"
+} | ConvertTo-Json -Depth 4
+
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/v1/agro/chat" -Method Post -Body $body -ContentType "application/json"
+```
+
+**Ask con sensores (recomendación estructurada):**
 ```powershell
 $body = @{
   question = "Tengo maíz en V6 con hojas amarillas en bordes. ¿Qué hago?"
@@ -112,7 +135,6 @@ $body = @{
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/v1/agro/ask" -Method Post -Body $body -ContentType "application/json"
 ```
 
-Ejemplo educativo conciso (length="short"):
 Ejemplo con recomendación estructurada (sensor):
 ```powershell
 $body = @{

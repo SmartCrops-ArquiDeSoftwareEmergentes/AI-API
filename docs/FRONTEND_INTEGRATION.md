@@ -1,100 +1,142 @@
-Documentación Técnica del Proyecto AI-API (Backend Agrícola con Gemini)
-1. Resumen del Proyecto
-API en FastAPI que envuelve un modelo Gemini para producir:
+Documentación Técnica de Integración Frontend (AI-API)
 
-Respuestas estructuradas de recomendación direccional (aumentar, disminuir, mantener) basadas en lecturas de sensores y contexto de cultivo.
-Respuestas educativas en formato bullets cuando no se proporcionan parámetros cuantificables.
-2. Arquitectura y Estructura de Carpetas (principal)
-c:\Users\CORSAIR\Documents\GitHub\AI-API
-├─ app
-│  ├─ main.py
-│  ├─ api
-│  │  └─ v1_agro.py         (endpoint /v1/agro/ask)
-│  ├─ services
-│  │  └─ gemini_client.py   (llamadas al modelo + parsing JSON)
-│  ├─ schemas
-│  │  ├─ requests.py         (AskRequest)
-│  │  └─ responses.py        (AskResponse + Recommendation)
-│  ├─ prompts
-│  │  └─ agriculture_system_prompt.md (prompt del sistema)
-│  └─ core / utils / config (según implementación)
-├─ tests
-│  └─ test_ask_post.py
-├─ scripts
-│  └─ post_local.py
-├─ requests
-│  └─ ask_local.http
-├─ .github
-│  └─ copilot-instructions.md
-├─ README.md
+1. Resumen
+La API en FastAPI envuelve Gemini para producir dos tipos de salida (siempre en español):
+* Recomendación direccional estructurada (aumentar | disminuir | mantener) cuando se envían lecturas cuantificables (parameter + value).
+* Resumen educativo en bullets cuando NO se envía parámetro medible.
 
-3. Endpoint Principal
-POST /v1/agro/ask
-Autenticación simple: cabecera x-api-key (validada contra variable de entorno API_KEY o valor dev en modo local).
-Respuesta condicionada: si se incluye parameter + value (+ unit recomendado) => intenta generar JSON con recomendación estructurada. Caso contrario => respuesta educativa.
-4. Esquema de Solicitud (Request Body JSON)
-Campos útiles (opcionales salvo crop o question según uso):
+2. Arquitectura Real del Repo
+```
+app/
+  main.py
+  routes/agro.py              # /health y /v1/agro/ask
+  services/gemini_client.py   # llamada al modelo + fallback heurístico
+  schemas/requests.py         # AskRequest
+  schemas/responses.py        # AskResponse, Recommendation, TargetRange
+  prompts/agriculture_system_prompt.md
+  utils/logger.py, sanitize.py
+api/index.py                  # entrypoint Vercel
+vercel.json
+scripts/smoke_test.py         # prueba rápida local
+README.md
+docs/FRONTEND_INTEGRATION.md  # este archivo
+requirements.txt
+```
+No existe `app/api/v1_agro.py`, carpeta `tests/` ni `requests/` actualmente. (Agregar en el futuro si se crean pruebas formales.)
+
+3. Endpoints
+* GET `/health` -> estado, mock_mode, modelo.
+* POST `/v1/agro/chat` -> **NUEVO**: Consulta de texto libre (solo pregunta, sin sensores). Responde con texto educativo.
+* POST `/v1/agro/ask` -> Recomendación direccional (con sensores) o resumen educativo (sin sensores).
+
+**Diferencia entre /chat y /ask:**
+* `/chat`: Textbox simple para preguntas generales → devuelve solo `answer`, `model`, `tips`.
+* `/ask`: Formulario completo con sensores → devuelve `answer` + `recommendation` estructurada cuando hay datos de sensores.
+
+Autenticación: hoy NO se valida ninguna API key en el código. Si el frontend necesita auth, deberá añadirse lógica (cabecera `x-api-key`) en `routes/agro.py`. Hasta entonces, omitir la cabecera.
+
+4. Esquemas de Solicitud
+
+### 4.1 ChatRequest (para /v1/agro/chat)
+```
 {
-  "question": "string (opcional si envías parámetro y valor)",
-  "crop": "string",
-  "temperature": 0,
-  "safe_mode": true,
-  "length": "short | medium",
-  "parameter": "humedad_suelo | temperatura_aire | temperatura_suelo | humedad_aire | ph_suelo | ce | ndvi | lluvia | vpd | luz | nutrientes | otro",
-  "value": 0,
-  "unit": "%, °C, pH, dS/m, mm, lux, etc.",
-  "stage": "string"
+  "question": "string (requerido)",
+  "crop": "string?",
+  "stage": "string?",
+  "length": "short" | "medium"? (default: medium),
+  "safe_mode": boolean? (default: true)
 }
-Descripción rápida:
-
-question: texto libre de la consulta.
-crop: cultivo (tomate, maíz, lechuga, etc.).
-stage: etapa (vegetativo, floración, V6, establecimiento, etc.).
-parameter: nombre del parámetro medido (ahora se recomienda usar español: humedad_suelo, temperatura_aire, temperatura_suelo, humedad_aire, ph_suelo, ce, ndvi, lluvia, vpd, luz, nutrientes, otro). También se aceptan nombres en inglés por compatibilidad; la API normaliza y siempre devuelve español.
-value: valor numérico observado.
-unit: unidad (%, °C, pH, etc.).
-temperature: contexto adicional (opcional, si ya no es el parámetro).
-safe_mode: si true, respuesta conservadora.
-length: extensión deseada (short | medium | long).
-5. Esquema de Respuesta (Response Body)
-Caso cuantitativo (ejemplo estructurado en español):
+```
+Respuesta ChatResponse:
+```
 {
-  "answer": "Texto breve resumido.",
+  "answer": "string",
+  "model": "string",
+  "tips": ["string", ...] | null
+}
+```
+
+### 4.2 AskRequest (para /v1/agro/ask)
+Campos (todos opcionales salvo que se requiere al menos `question` O (`parameter` + `value`)):
+```
+{
+  "question": "string?",
+  "crop": "string?",
+  "temperature": number?,
+  "safe_mode": boolean? (default true),
+  "length": "short" | "medium"?,
+  "parameter": "humedad_suelo | temperatura_aire | temperatura_suelo | humedad_aire | ph_suelo | ce | ndvi | lluvia | vpd | luz | nutrientes | otro"?,
+  "value": number?,
+  "unit": "string?",
+  "stage": "string?"
+}
+```
+Notas:
+* `length` sólo admite `short` o `medium` (el prompt interno ajusta tokens). No existe `long`.
+* Se aceptan parámetros en inglés equivalentes: soil_moisture, air_temperature, etc. Internamente se normalizan y al responder se devuelven en español.
+* Si se envía `parameter` sin `value` se obtendrá error 400.
+* `safe_mode=true` mantiene tono muy educativo y activa reframings si el modelo bloquea.
+
+5. Traducción de Parámetros (interno -> salida)
+```
+soil_moisture -> humedad_suelo
+air_temperature -> temperatura_aire
+soil_temperature -> temperatura_suelo
+air_humidity -> humedad_aire
+soil_ph -> ph_suelo
+ec -> ce
+ndvi -> ndvi
+rain -> lluvia
+light -> luz
+nutrients -> nutrientes
+vpd -> vpd
+other -> otro
+```
+
+6. Esquema de Respuesta (AskResponse)
+```
+{
+  "answer": "string",
+  "model": "string",
+  "usage": { ... } | null,
+  "tips": ["string", ...] | null,
   "recommendation": {
-  "action": "aumentar",
-  "parameter": "humedad_suelo",
-    "target_range": { "min": 22, "max": 30, "unit": "%" },
-    "rationale": "Valor 18% por debajo del rango orientativo 22–30%.",
-    "warnings": ["Rango estimado; ajustar según textura del suelo."]
-  }
+    "action": "aumentar | disminuir | mantener",
+    "parameter": "<parametro_en_español>",
+    "target_range": {"min": number|null, "max": number|null, "unit": "string|null"},
+    "rationale": "string",
+    "warnings": ["string", ...]
+  } | null
 }
-Caso educativo (sin parameter/value):
+```
+Si el modelo falla al generar JSON estructurado se usa una heurística interna para producir la recomendación (con rangos genéricos o nulos).
 
+7. Rangos y Casos Especiales
+* Parámetros con rangos genéricos: humedad_suelo (20–30 %), temperatura_aire (18–30 °C), temperatura_suelo (15–25 °C), humedad_aire (50–80 %), ph_suelo (6.0–7.5), ce (0.8–2.5 dS/m), ndvi (0.5–0.9), vpd (0.8–1.5 kPa).
+* Parámetros SIN rango confiable universal: luz, lluvia, nutrientes -> se devuelven `min=null`, `max=null` y advertencias explicativas; acción por defecto suele ser `mantener` salvo que futura lógica indique otra dirección.
+
+8. Ejemplos para Swagger (/docs)
+
+### Ejemplos para /v1/agro/chat (texto libre)
+**Chat 1: Pregunta general**
+```
 {
-  "answer": "- Monitorea humedad del suelo...\n- Revisa signos de estrés hídrico...",
-  "recommendation": null
+  "question": "¿Qué factores afectan el crecimiento de lechuga en hidroponía?",
+  "crop": "lechuga",
+  "length": "short"
 }
+```
+**Chat 2: Consulta sobre manejo**
+```
+{
+  "question": "Estrategias para mejorar la retención de agua en suelos arenosos",
+  "length": "medium"
+}
+```
 
-6. Prompt del Sistema (Resumen)
-Archivo agriculture_system_prompt.md define:
-
-Rol: asistente agrícola de ajuste direccional (aumentar/disminuir/mantener).
-Contenido permitido: rangos orientativos, acciones generales.
-Prohibiciones: marcas, dosis exactas, instrucciones operativas peligrosas.
-Formato JSON obligatorio cuando se incluye parámetro numérico.
-Fallback: bullets educativos si no hay parámetro.
-(Ver archivo para texto completo; reproducible si el frontend requiere replicar contexto.)
-
-7. Flujo Interno de Procesamiento
-Validación API key.
-Construcción del mensaje al modelo con prompt del sistema + datos del usuario.
-Si hay parameter/value/unit:
-Se fuerza salida JSON (response_mime_type=application/json).
-Se parsea el JSON; si falla, se aplica heurística local para generar recommendation segura.
-Se retorna Answer + Recommendation (o sólo Answer en modo educativo).
-safe_mode puede ajustar temperatura de respuesta (control de expansión textual).
-8. Ejemplos Listos para /docs (Try it out)
-Ejemplo A (humedad suelo baja)
+### Ejemplos para /v1/agro/ask (sensores)
+**Ejemplo A (humedad suelo baja)**
+```
 {
   "question": "Lectura de humedad de suelo",
   "crop": "tomate",
@@ -102,11 +144,12 @@ Ejemplo A (humedad suelo baja)
   "parameter": "humedad_suelo",
   "value": 18.0,
   "unit": "%",
-  "temperature": 26,
   "safe_mode": true,
   "length": "short"
 }
+```
 Ejemplo B (temperatura aire alta)
+```
 {
   "question": "Temperatura del invernadero",
   "crop": "lechuga",
@@ -117,7 +160,9 @@ Ejemplo B (temperatura aire alta)
   "safe_mode": true,
   "length": "short"
 }
+```
 Ejemplo C (educativo sin parámetro)
+```
 {
   "question": "Factores para evitar estrés hídrico en maíz",
   "crop": "maíz",
@@ -125,24 +170,35 @@ Ejemplo C (educativo sin parámetro)
   "safe_mode": true,
   "length": "short"
 }
+```
 Ejemplo D (pH en rango)
+```
 {
   "question": "Lectura semanal de pH",
   "crop": "arándano",
   "stage": "establecimiento",
   "parameter": "ph_suelo",
-  "value": 4.8,
+  "value": 6.2,
   "unit": "pH",
   "safe_mode": true,
   "length": "short"
 }
+```
 Ejemplo E (humedad aire muy alta)
+```
 {
   "question": "Humedad relativa dentro del invernadero",
   "crop": "tomate",
   "stage": "floración",
   "parameter": "humedad_aire",
-Ejemplo F (luz 0 lux – sin rango genérico)
+  "value": 88,
+  "unit": "%",
+  "safe_mode": true,
+  "length": "short"
+}
+```
+Ejemplo F (luz sin rango genérico)
+```
 {
   "crop": "maíz",
   "parameter": "luz",
@@ -151,8 +207,9 @@ Ejemplo F (luz 0 lux – sin rango genérico)
   "safe_mode": true,
   "length": "short"
 }
-
-Ejemplo G (lluvia 0 mm – sin rango genérico)
+```
+Ejemplo G (lluvia sin rango genérico)
+```
 {
   "crop": "maíz",
   "parameter": "lluvia",
@@ -161,8 +218,9 @@ Ejemplo G (lluvia 0 mm – sin rango genérico)
   "safe_mode": true,
   "length": "short"
 }
-
-Ejemplo H (nutrientes 250 – requiere contexto)
+```
+Ejemplo H (nutrientes requiere contexto)
+```
 {
   "crop": "maíz",
   "parameter": "nutrientes",
@@ -170,134 +228,158 @@ Ejemplo H (nutrientes 250 – requiere contexto)
   "safe_mode": true,
   "length": "short"
 }
-  "value": 88,
-  "unit": "%",
-  "safe_mode": true,
-  "length": "short"
-}
-9. Integración Frontend (Sugerencias)
-Crear formulario dinámico:
-Selector cultivo (crop).
-Selector etapa (stage).
-Selector parámetro (parameter).
-Input numérico (value) + unidad (unit).
-Campo opcional pregunta (question).
-Si el usuario ingresa value y parameter => mostrar bloque “Recomendación” con:
-Acción (aumentar / disminuir / mantener) como etiqueta de color.
-Rango objetivo (min–max unit).
-Rationale en tooltip.
-Warnings como lista pequeña.
-Si no ingresa parámetro => mostrar bullets educativos en panel lateral.
-Manejar errores:
-401/403: API key incorrecta.
-400: falta de datos mínimos (ni question ni parameter+value).
-422: Validaciones de esquema (por ejemplo, tipos no numéricos donde corresponde).
-500: Fallback genérico (“Reintentar” + log interno).
-Cache ligera: almacenar última recomendación por (crop, stage, parameter) para mostrar historial.
-10. Variables de Entorno
-API_KEY: clave para x-api-key.
-GEMINI_API_KEY / GOOGLE_API_KEY (según cliente Gemini).
-ENV=dev|prod para activar logs verbose o modo demo si existe.
-11. Seguridad y Bloqueos del Modelo
-Prompt reduce falsos positivos evitando contenido operacional detallado.
-Recomendaciones siempre genéricas y direccionales.
-Warnings incluyen supuestos (evita interpretaciones peligrosas).
-safe_mode habilita sesgo conservador.
-12. Tests Básicos
-test_ask_post.py: valida respuesta 200 y estructura recommendation si procede.
-Pendientes: tests de parsing fallido JSON, tests de heurística fallback, tests de casos sin parameter.
-13. Posibles Extensiones
-Archivo YAML/JSON con rangos por cultivo/etapa para mayor precisión.
-Endpoint /v1/agro/ranges para exponer rangos al frontend.
-Historial de consultas (persistencia con SQLite/PostgreSQL).
-Rate limiting por API key.
-14. Items Pendientes Según Instrucciones (.github/copilot-instructions.md)
-Customize the Project: agregar rangos externos configurables.
-Compile the Project: asegurar instalación dependencias en README.
-Create and Run Task: tasks.json para iniciar uvicorn.
-Launch the Project: definir modo debug.
-Ensure Documentation is Complete: incorporar esta sección al README.
-15. Actualización Sugerida README
-# AI-API (AgroReg)
-
-API FastAPI que envuelve Gemini para recomendaciones agrícolas direccionales (increase, decrease, maintain) y respuestas educativas.
-
-## Endpoints
-- GET /health
-- POST /v1/agro/ask
-
-## Autenticación
-Enviar cabecera:
-x-api-key: TU_API_KEY
-
-## Solicitud (POST /v1/agro/ask)
-```json
-{
-  "question": "Lectura de humedad de suelo",
-  "crop": "tomate",
-  "stage": "vegetativo",
-  "parameter": "soil_moisture",
-  "value": 18.0,
-  "unit": "%",
-  "safe_mode": true,
-  "length": "short"
-}
 ```
 
-## Respuesta (ejemplo estructurado)
-```json
-{
-  "answer": "La humedad está por debajo del rango orientativo.",
-  "recommendation": {
-    "action": "increase",
-    "parameter": "soil_moisture",
-    "target_range": { "min": 22, "max": 30, "unit": "%" },
-    "rationale": "Valor 18% menor al rango estimado 22–30%.",
-    "warnings": ["Rango genérico; ajustar según textura del suelo."]
+9. Integración Frontend (UI/UX)
+
+### Opción 1: Textbox Simple (/v1/agro/chat)
+Para casos de uso tipo chatbot o consulta rápida:
+* Un `<textarea>` para la pregunta.
+* Selects opcionales para cultivo y etapa.
+* Botón "Preguntar".
+* Renderiza la respuesta `answer` en un panel de texto o markdown.
+
+### Opción 2: Formulario Completo (/v1/agro/ask)
+Para tableros de sensores o monitoreo:
+* Select cultivo (`crop`).
+* Select etapa (`stage`).
+* Select parámetro (`parameter`).
+* Input numérico (`value`) + select unidad (`unit`).
+* Campo de texto (`question`) opcional.
+
+Renderizado:
+* Si existe `recommendation` -> tarjeta con:
+  - Acción (badge con colores: aumentar=verde, disminuir=rojo, mantener=azul/gris).
+  - Parámetro y rango (si disponible) `min–max unit`.
+  - Rationale (tooltip o bloque secundario).
+  - Warnings (lista compacta).
+* Si no hay `recommendation` -> panel de bullets educativos (puede parsearse por saltos de línea).
+
+10. Manejo de Errores HTTP
+* 400: faltan datos mínimos (ni question ni parameter+value) o pregunta demasiado larga.
+* 502: error al contactar el modelo (mostrar mensaje “Servicio temporalmente indisponible, reintenta”).
+* 422: error de validación de tipos (Pydantic) – mostrar detalle.
+* Otros: fallback genérico y log interno.
+
+11. Estado Demo vs Real
+Si `settings.mock_mode` fuese true (no llave de Gemini), la respuesta incluiría tag `[MODO DEMO]` (hoy no se está en demo). El frontend puede detectar substring y mostrar banner “Resultados simulados”.
+
+12. Heurística vs Modelo
+* Flujo preferente: modelo genera JSON.
+* Si falla: heurística produce recomendación direccional usando rangos genéricos.
+* En parámetros sin rango -> acción `mantener` + advertencias para solicitar mayor contexto.
+
+13. Ejemplo de Consumo en JavaScript (fetch)
+
+### Chat (texto libre)
+```js
+async function preguntarChat(question, crop = null, length = 'medium') {
+  const res = await fetch('http://127.0.0.1:8000/v1/agro/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question, crop, length })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Error ${res.status}: ${err.detail || 'fallo desconocido'}`);
   }
+  return res.json();
+}
+
+// Uso
+preguntarChat('¿Cómo riego tomates en verano?', 'tomate', 'short')
+  .then(data => console.log(data.answer))
+  .catch(console.error);
+```
+
+### Ask (sensores)
+```js
+async function pedirRecomendacion(payload) {
+  const res = await fetch('http://127.0.0.1:8000/v1/agro/ask', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Error ${res.status}: ${err.detail || 'fallo desconocido'}`);
+  }
+  return res.json();
+}
+
+// Ejemplo de uso
+pedirRecomendacion({
+  question: 'Lectura de humedad de suelo',
+  crop: 'tomate',
+  parameter: 'humedad_suelo',
+  value: 18.0,
+  unit: '%',
+  length: 'short'
+}).then(console.log).catch(console.error);
+```
+
+14. Tipos TypeScript (sugeridos)
+
+### Chat
+```ts
+export interface ChatRequest {
+  question: string;
+  crop?: string;
+  stage?: string;
+  length?: 'short' | 'medium';
+  safe_mode?: boolean;
+}
+export interface ChatResponse {
+  answer: string;
+  model: string;
+  tips?: string[] | null;
 }
 ```
 
-## Respuesta educativa (sin parámetro)
-```json
-{
-  "answer": "- Monitorea humedad del suelo...\n- Observa signos de estrés hídrico...",
-  "recommendation": null
+### Ask (sensores)
+```ts
+export interface TargetRange { min: number | null; max: number | null; unit: string | null; }
+export interface Recommendation {
+  action: 'aumentar' | 'disminuir' | 'mantener';
+  parameter: string;
+  target_range: TargetRange | null;
+  rationale: string | null;
+  warnings: string[] | null;
+}
+export interface AskResponse {
+  answer: string;
+  model: string;
+  usage?: Record<string, any> | null;
+  tips?: string[] | null;
+  recommendation?: Recommendation | null;
 }
 ```
 
-## Ejecución local
-```bash
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
-```
+15. Consideraciones de Encoding
+Usar UTF-8. Algunos guiones en-dash “–” pueden aparecer; normalizar a “-” si afecta el layout. Verificar correcto render de tildes y caracteres especiales.
 
-## Tests
-```bash
-.\.venv\Scripts\python.exe -m pytest -q
-```
+16. Guardrails Futuras (no implementadas aún)
+* pH fuera de [0,14] -> advertencia / rechazo.
+* humedad_suelo > 100% -> advertencia.
+* valores negativos en parámetros no negativos -> rechazo 400.
+* unidad incompatible (p.ej. °C para ph_suelo) -> advertencia automática.
 
-## Prompt del Sistema
-Ver: app/prompts/agriculture_system_prompt.md
+17. Extensiones Planeadas
+* Archivo externo con rangos por cultivo + etapa.
+* Endpoint `/v1/agro/ranges`.
+* Historial y cache per usuario.
+* Autenticación por API key y rate limiting.
 
-## Futuras mejoras
-- Rangos por cultivo externos
-- Historial y caching
-- Endpoint de rangos
+18. Checklist Diferencias con README
+* Este documento ya refleja la ausencia de auth actual.
+* Limita `length` a short/medium.
+* Añade ejemplos corregidos y no truncados.
+* Proporciona tipos y snippet fetch.
 
-16. Errores Comunes y Soluciones
-401 sin API key: agregar cabecera x-api-key.
-Respuesta sin recommendation: faltan parameter/value o no se reconoce el parámetro; en casos sin rango (luz, lluvia, nutrientes) se devuelve igualmente una recomendación con min/max nulos y advertencias.
-Modelo retorna texto no JSON: fallback interno; revisar logs para parse.
-Unicode en guiones (–): normal; frontend puede normalizar.
-17. Recomendación para Frontend AI
-Proveerle:
+19. Frontend AI (otro modelo)
+Si otro modelo (ej. para UI) necesita contexto, proveer: archivo de prompt, lista de parámetros soportados, este doc y ejemplos A–H. Pedir siempre acción, rango, rationale y warnings para consistencia visual.
 
-Este README + prompt del sistema.
-Esquemas de request/response.
-Lista de parámetros soportados.
-Comportamiento condicional (estructurado vs educativo).
-Estrategia de visualización (tarjeta de recomendación + panel de bullets).
-Si necesitas exportar esto en un solo archivo JSON o Markdown consolidado para consumo de otra IA, pídelo. ¿Requieres también tasks.json o archivo con rangos base? Indica.
+20. Export Consolidado
+Si se requiere un único JSON con esquemas + ejemplos para bootstrap del frontend, solicitarlo y se generará.
+
+Fin del documento.
